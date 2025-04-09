@@ -1,0 +1,2 @@
+# 取消对 node_modules文件夹所有文件的追踪
+node_modules/
