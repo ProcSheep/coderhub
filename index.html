@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+<body>
+  <script>
+    // js可以设置cookie,工作业务几乎不用js去设置cookie
+    // 设置过期时间max-age (秒,s); 这个cookie是硬盘cookie,过期后清除
+    // 而不设置过期时间,默认就是内存cookie,浏览器关闭后会被清除
+    document.cookie = "name=codewhy;max-age=30"
+    document.cookie = "age=35;max-age=60"
+  </script>
+</body>
+</html>

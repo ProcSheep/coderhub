@@ -3,6 +3,7 @@ const Koa = require('koa')
 const bodyParser = require('koa-bodyparser')
 // 引入路由
 const userRouter = require('../router/user.router.js')
+const loginRouter = require('../router/login.router.js')
 
 // 1.创建app
 const app = new Koa()
@@ -11,6 +12,8 @@ const app = new Koa()
 app.use(bodyParser())
 app.use(userRouter.routes())
 app.use(userRouter.allowedMethods())
+app.use(loginRouter.routes())
+app.use(loginRouter.allowedMethods())
 
 // 3.导出app
 module.exports = app
