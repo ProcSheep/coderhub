@@ -10,7 +10,7 @@ class LoginController {
     // 2.颁发令牌token -- 非对称加密
     const payload = {id,name}
     const token = jwt.sign(payload,PRIVATE_KEY,{
-      expiresIn: 24 * 60 * 60,
+      expiresIn: '1d', // '1h' '1d', 或者 number秒数 
       algorithm: 'RS256'
     })
 

@@ -1,4 +1,64 @@
 # coderhub
+## 易错点ERROR
+### ERR-修改用户动态
+- 错误来源点`内容管理系统/修改用户动态`
+- router的代码
+  ```js
+    momentRouter.patch('/:momentId',verifyAuth,updateMoment)
+  ```
+- verifyAuth的代码
+  ```js
+    // 验证Auth的中间件
+    async function  verifyAuth(ctx,next) {
+        // 1.获取客户端auth
+        const authorization = ctx.headers.authorization
+        if(!authorization) return ctx.app.emit('error',UNANTHORIZATION,ctx)
+        const token = authorization.replace('Bearer ','')
+
+        // 2.验证token中的信息
+        try {
+          const res = jwt.verify(token,PUBLIC_KEY,{
+            algorithms: ['RS256']
+          })
+          // 3.把解析的信息存入ctx(下一个中间件使用)
+          ctx.user = res
+          // 4.传递给下一个中间件
+          await next()
+        } catch (error) {
+          ctx.app.emit('error',UNANTHORIZATION,ctx)
+        }
+    }
+  ```
+- updateMoment的代码
+  ```js
+    async updateMoment(ctx,next){
+      // 1.获取修改的内容
+      const {content} = ctx.request.body
+      // 2.获取要修改的动态的id
+      const {momentId} = ctx.params
+      // 3.执行数据库操作
+      const res = await momentService.updateById(content,momentId)
+      // 4.返回数据
+      ctx.body = {
+        code: 0,
+        message: '修改动态成功',
+        data: res
+      }
+    }
+  ```
+- 查询操作updateById
+  ```js
+    async updateById(content,id){
+      const statement = `UPDATE moment SET content = ? WHERE id = ?;`
+      const [result] = await connection.execute(statement,[content,id])
+      return result
+    }
+  ```
+- ==**易错点**==
+  - 在updateMoment和updateById的代码中,查询数据库操作时没有设置try-catch,所以如果这个操作出现错误,那么就会回到verifyAuth代码中`await next()`,这个代码代表执行下一个中间件,那么当这个中间件出现错误,就会执行verifyAuth内部的try-catch命令,显示你的token过期了,其实根本不是token的问题,只是代码逻辑的问题导致报错爆出的信息误导了你
+  - ==解决==: 可以在updateMoment代码中添加新的try-catch语句
+### ERR-删除和修改用户动态测试
+- 注意: 删除和修改动态的代码肯定是对的,所以如果出现错误,一定是登录校验的问题,经检查,apifox的全局设置token可能并不及时,有时候出现这种情况,先重新登录一次,然后再把删除和修改动态的接口中auth的token重新设置一次,再从终端中打印看看是不是有token
 ## 项目介绍
 - Coderhub只在创建一个程序员分享生活动态的平台; ==旨在练习node高级和mysql的练习demo==
 - 完整的项目接口包括:
@@ -643,7 +703,7 @@
       const payload = { id: "007", name: "codewhy" };
       // 私钥颁发
       const token = jwt.sign(payload, privateKey, {
-        expiresIn: 6000, // 过期时间(秒)
+        expiresIn: '1d', // '1h' '1d', 或者 number秒数
         algorithm: 'RS256' // RS256是非对称加密,之前用的对称加密是SH256(默认的)
       });
       ctx.body = {
@@ -829,7 +889,7 @@
     async function  verifyAuth(ctx,next) {
         // 1.获取客户端auth
         const authorization = ctx.headers.authorization
-        if(!authorization) return 
+        if(!authorization) return ctx.app.emit('error',UNANTHORIZATION,ctx)
         const token = authorization.replace('Bearer ','')
         // 2.验证token中的信息
         try {
@@ -899,3 +959,469 @@
     const registerRouters = require('../router/index.js')
     registerRouters(app)
   ```
+## 内容管理系统
+- 内容
+  - 用户动态的增删改查
+  - sql语句练习
+  - 连表查询
+### 创建用户动态
+- 1.创建router-controller-service一套后端逻辑系统
+- 2.实现的功能,==发送动态内容(apifox测试==),经验证后,可以存入数据库中
+- 已经在navicat中,创建对应的数据库moment
+  ```sql
+    -- 2.创建moment表(动态评论的表)
+    CREATE TABLE IF NOT EXISTS `moment`(
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      content VARCHAR(1000) NOT NULL, -- 评论
+      user_id INT NOT NULL, -- 发布人id
+      createAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updateAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES user(id) -- 发布人id受user表约束(即发布人必须是用户表内存在的用户)
+    );
+  ```
+- ==1.router==
+  ```js
+    // moment.router.js
+    const KoaRouter = require('@koa/router')
+    const {verifyAuth} = require('../middleware/login.middlerware.js')
+    const {create} = require('../controller/moment.controller.js')
+
+    const momentRouter = new KoaRouter({prefix:'/moment'})
+
+    // 编写动态接口
+    // 中间件逻辑: 校验登录(检查令牌) -> 发表动态
+    momentRouter.post('/',verifyAuth,create)
+
+    module.exports = momentRouter
+  ```
+- ==2.controller==
+  ```js
+    // moment.controller.js
+
+    const momentService = require("../service/moment.service")
+
+    class MomentController {
+      // 创建动态
+      async create(ctx,next){
+        // 1.获取动态内容
+        const {content} = ctx.request.body
+        // 2.谁发布的动态(寻找登录者的信息)
+        // ctx.user的信息来自于上一个中间件verifyAuth
+        const {id,name} = ctx.user
+        console.log(id,name,content)
+        // 3.将动态的数据保存到数据库中
+        // 涉及数据库操作,把函数封装进service中
+        const res = await momentService.create(content,id)
+        ctx.body = {
+          code: 0,
+          message: '创建用户动态成功',
+          data: res
+        }
+
+      }
+    }
+
+    module.exports = new MomentController()
+  ```
+- ==3.service==
+  ```js
+    const connection = require('../app/database')
+
+    class MomentService {
+      async create(content,userId){
+        const statement = 'INSERT INTO moment (content,user_id) VALUES (?,?);'
+        const [result] = await connection.execute(statement,[content,userId])
+        return result
+      }
+    }
+
+    module.exports = new MomentService()
+  ```
+- ==效果图:==
+  [![pERrhqA.png](https://s21.ax1x.com/2025/04/12/pERrhqA.png)](https://imgse.com/i/pERrhqA)
+### 查询用户动态数据
+- ==准备工作:== 
+  - 1.查询数据库中moment的数据(已经在navicat手动添加了许多数据进去了)
+  - 2.使用apifox查询,使用`url?offset=0&size=10` 
+- 1.获取动态列表的接口router
+  ```js
+    // 用户获取动态不需要验证用户身份
+    const {create,getMomentList} = require('../controller/moment.controller.js')
+    momentRouter.get('/',getMomentList)
+  ```
+- 2.controller,获取offset和size并返回查询结果
+  ```js
+    const momentService = require("../service/moment.service")
+    // 获取用户动态列表
+    async getMomentList(ctx,next){
+      // 1.从数据库中查动态
+      const {offset,size} = ctx.query
+      const res = await momentService.queryList(offset,size)
+      // 2.返回数据
+      ctx.body = {
+        code: 0,
+        data: res
+      }
+    }
+  ```
+- 3.数据库操作service
+  ```js
+    async queryList(offset=0,size=10){
+      // 分页查询
+      const statement = `
+        SELECT
+          m.id id,
+          m.content content,
+          m.createAt createTime,
+          m.updateAt updateTime,
+          JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user
+        FROM
+          moment m
+          LEFT JOIN USER u ON u.id = m.user_id
+          LIMIT ? OFFSET ?;
+      `
+      // offset和size要转化为字符串才可以查询
+      const [result] = await connection.execute(statement,[String(size),String(offset)]) 
+      return result
+    }
+  ```
+  > ==连表查询的知识回顾==
+  > 1.使用左连接查询,通过user表的id和moment表的user_id(外键)连接
+  > 2.创建新的对象user,放入查询的user表数据,其中包括用户的'id,名字,用户创建日期和用户更新日期'
+### 查询用户动态详情
+- ==和查询用户动态列表代码几乎一样==,只是这一次是根据momentId去具体查询某一条动态的信息
+- ==区别:== 
+  - 1.查询条件由query变为params,momentId作为动态路由的一部分,使用apifox查询`url/1`(/:momentId占位符)
+  - 2.查询sql语句条件变化,删除`offset,size...`,添加`WHERE u.id = ?`,即查询符合条件的id
+- 1.router
+  ```js
+    // 获取某一条动态的详情,动态路由
+    momentRouter.get('/:momentId',getMomentDetail)
+  ```
+- 2.controller.js
+  ```js
+  async getMomentDetail(ctx,next){
+      // 1.获取动态id(动态id存入路由中,使用params获取)
+      const {momentId} = ctx.params
+      // 2.根据id查询动态详情
+      const res = await momentService.queryById(momentId)
+      // 2.返回数据
+      ctx.body = {
+        code: 0,
+        data: res[0] // 只有一条数据
+      }
+    }
+  ```
+- 3.service.js
+  ```js
+    async queryById(id){
+      const statement = `
+        SELECT
+          m.id id,
+          m.content content,
+          m.createAt createTime,
+          m.updateAt updateTime,
+          JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user
+        FROM
+          moment m
+          LEFT JOIN USER u ON u.id = m.user_id
+          WHERE m.id = ?;
+      `
+      const [result] = await connection.execute(statement,[id])
+      return result
+    }
+  ```
+### 修改用户动态
+- apifox测试,参数为: 动态的id(params) + body-json(修改的内容content)
+- router
+  ```js
+    // -------3.改: 修改动态-----------
+    // 修改操作一般是patch(意为'修补,打补丁')
+    // 只有登录的用户才能修改动态
+    momentRouter.patch('/:momentId',verifyAuth,updateMoment)
+  ```
+- controller
+  ```js
+    async updateMoment(ctx,next){
+      // 1.获取修改的内容
+      const {content} = ctx.request.body
+      // 2.获取要修改的动态的id
+      const {momentId} = ctx.params
+      // 3.执行数据库操作
+      const res = await momentService.updateById(content,momentId)
+      // 4.返回数据
+      ctx.body = {
+        code: 0,
+        message: '修改动态成功',
+        data: res
+      }
+    }
+  ```
+- service
+  ```js
+    async updateById(content,id){
+      const statement = `UPDATE moment SET content = ? WHERE id = ?;`
+      const [result] = await connection.execute(statement,[content,id])
+      return result
+    }
+  ```
+### 修改用户动态优化
+- ==优化点: 用户只能修改自己的动态,需要一个验证权限的中间件==
+- ==测试用户为2号用户==,登录的用户名和密码如下
+  ```
+    {
+      "name":"jame",
+      "password":"666999"
+    }
+  ```
+- 此用户修改动态时只能修改自己创建过的动态,对别的用户的动态无权修改,如下
+  ![修改动态权限的演示](https://github.com/ProcSheep/picx-images-hosting/raw/master/学习笔记/修改动态权限的演示.2h8ht0633n.png)
+  > 1.即jame用户可以修改momentId为8的数据,但是不可以修改momentId为11的数据 
+  > 2.momentId还是`url/:momentId`的方式传递
+  > ==3.注意在后面的删除用户动态章节测试中,我已经把8号数据给删除了,所以记得看着数据库重新测试,数据库是变化的==
+- router 新增鉴权中间件verifyMomentPermission
+  ```js
+    momentRouter.get('/:momentId',getMomentDetail)
+    // -------3.改: 修改动态-----------
+    // 修改操作一般是patch(意为'修补,打补丁')
+    // 只有登录的用户才能修改动态
+    // 权限认证中间件: 用户只能修改自己的动态
+    momentRouter.patch('/:momentId',verifyAuth,verifyMomentPermission ,updateMoment)
+  ```
+- verifyMomentPermission代码 ==(/middleware)==
+  ```js
+    const {checkMomentPermission} = require('../service/permission.service')
+    const {OPERATION_IS_NOT_ALLOW} = require('../config/error')
+
+    async function  verifyMomentPermission(ctx,next) {
+      // 1.获取登录用户的id和要修改动态的momentId
+      const {momentId} = ctx.params // 这是你要修改的动态id
+      const {id} = ctx.user // 此信息来自于上一个中间件verifyAuth,可以获取到用户的id信息
+      // 2.查询user的id是否由修改momentId动态的权限
+      const isPermission = await checkMomentPermission(momentId,id)
+      if(!isPermission){ // 无权限
+        return ctx.app.emit('error',OPERATION_IS_NOT_ALLOW,ctx)
+      }
+      // 有权限,执行下一个中间件,更改用户的动态
+      await next()
+    }
+
+    module.exports = verifyMomentPermission
+  ```
+  > 1.错误配置OPERATION_IS_NOT_ALLOW略
+  > 2.记得操作数据库用异步
+- 操作数据库service
+  ```js
+    // permission.service.js
+    const connection = require('../app/database')
+
+    class PermissionService {
+      async checkMomentPermission(momentId,user_id){
+        // 当momentId(id)和用户user_id都满足条件时,会查询到数据,这就是有权限
+        const statement = 'SELECT * FROM moment WHERE id = ? AND user_id = ?'
+        const [result] = await connection.execute(statement,[momentId,user_id])
+        return !!result.length // 转为布尔,0为false,其余为true
+      }
+    }
+
+    module.exports = new PermissionService()
+  ```
+  > 双!可以快速把数字转为布尔值
+### 删除用户动态
+- ==和修改用户动态一样,复用一下鉴权的中间件们(verifyAuth,verifyMomentPermission)==
+  ```js
+    // -------4.删: 删除动态-----------
+    // 同理和更新用户一样,需要验证token和鉴权
+    momentRouter.delete('/:momentId',verifyAuth,verifyMomentPermission,deleteMoment)
+  ```
+- deleteMoment (/controller)
+  ```js
+    // 删除用户动态(1条)
+    async deleteMoment(ctx,next){
+      // 1.获取要删除动态的id
+      const {momentId} = ctx.params
+      // 2.数据库操作
+      const res = await momentService.deleteById(momentId)
+      // 3.返回数据
+      ctx.body = {
+        code: 0,
+        message: '删除动态成功',
+        data: res
+      }
+    }
+  ```
+- service
+  ```js
+    async deleteById(id){
+      const statement = `DELETE FROM moment WHERE id = ?;`
+      const [result] = await connection.execute(statement,[id])
+      return result
+    }
+  ```
+### 优化封装鉴权函数
+- 功能: 
+  - ==1.优化鉴权函数,更加灵活(**对于格式有更严格的要求**)==
+  - ==2.自己新增检验数据是否存在的函数(isDataExists)==
+- 优化鉴权代码
+  ```js
+    // permission.middleware.js
+    // 灵活的鉴权组件
+    async function  verifyPermission(ctx,next) {
+      // 1.获取用户的id
+      const {id} = ctx.user
+      // 2.灵活化,根据params中的momentId信息,判断这是类型数据的鉴权
+      // 这样以后不仅是动态(mount),其他比如评论(comment)等功能,都可以复用
+      // 动态的前提是: /:momentId 起名字格式为 /:表名字Id (/:commentId)
+      // ctx.params => { momentId : 4 }
+      const keyName = Object.keys(ctx.params)[0] // momentId
+      const resourceId = ctx.params[keyName] // 4
+      const resourceName = keyName.replace('Id','') // moment
+      // console.log(keyName,resourceName,resourceId)
+
+      // 可以先查询下这个资源是否存在(如果被删除了,就不要进行操作了)
+      const isDataExists = await checkExists(resourceName,resourceId)
+      if(!isDataExists){ // 数据不存在
+        return ctx.app.emit('error', DATA_IS_NOT_EXISTS,ctx)
+      }
+      // 鉴权
+      const isPermission = await checkPermission(resourceName,resourceId,id)
+      if(!isPermission){ // 无权限
+        return ctx.app.emit('error',OPERATION_IS_NOT_ALLOW,ctx)
+      }
+      // 有权限,执行下一个中间件,更改用户的动态
+      await next()
+    }
+  ```
+  > 看注释即可,学会如何拆分信息; 同时注意以后占位符路由的格式
+- 鉴定权限的代码(数据库操作)
+  ```js
+    // permission.service.js
+    class PermissionService {
+      // 鉴定有没有权限
+      async checkPermission(resourceName,resourceId,user_id){
+        const statement = `SELECT * FROM ${resourceName} WHERE id = ? AND user_id = ?;`
+        const [result] = await connection.execute(statement,[resourceId,user_id])
+        return !!result.length
+      }
+
+      // 鉴定有没有数据
+      async checkExists(resourceName,resourceId){
+        const statement = `SELECT * FROM ${resourceName} WHERE id = ?;`
+        const [result] = await connection.execute(statement,[resourceId])
+        return !!result.length // 转为布尔,0为false,其余为true
+      }
+    }
+  ```
+  > 1.鉴定权限和之前的逻辑一样,把sql语句动态化了,传入的所有参数都是动态化的(resourceName,resourceId,user_id)
+  > 2.鉴定有没有数据是我自己加的函数,代码正确,主要从表中根据id查询是否有这个数据,如果没有数据,就不必进一步操作了,直接返回相关信息即可
+### 创建评论接口
+- 创建动态路由的sql语句
+  ```sql
+    -- 3.创建评论表
+    CREATE TABLE IF NOT EXISTS `comment`(
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      content VARCHAR(1000) NOT NULL, -- 评论内容
+      moment_id INT NOT NULL, -- 给哪一条动态评论
+      user_id INT NOT NULL, -- 谁评论的
+      comment_id INT DEFAULT NULL, -- 是否在回复另一条评论(可选)
+      createAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updateAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      
+      FOREIGN KEY(moment_id) REFERENCES moment(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES user(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      FOREIGN KEY(comment_id) REFERENCES comment(id) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+  ```
+- router-controller-service一条龙
+  ```js
+    // router
+    const commentRouter = new KoaRouter({prefix:'/comment'})
+
+    // 增: 新增评论
+    // 登录才能评论
+    commentRouter.post('/',verifyAuth,createComment)
+  ```
+  ```js
+    class CommentController {
+      // 创建评论
+      async createComment(ctx,next){
+        // 1.拿评论内容,动态id以及用户id
+        const {content,momentId} = ctx.request.body
+        const {id} = ctx.user
+        // console.log(content,momentId,id)
+        // 2.操作数据库,将数据存入数据库
+        const res = await commentService.create(content,momentId,id)
+        ctx.body = {
+          code: 0,
+          message: '发表评论成功!',
+          data: res
+        }
+      }
+    }
+  ```
+  ```js
+    class CommentService {
+      async create(content,momentId,userid){
+        const statement = 'INSERT INTO comment (content,moment_id,user_id) VALUES (?,?,?);'
+        const [result] = await connection.execute(statement,[content,momentId,userid])
+        return result
+      }
+    }
+  ```
+- ==apifox传参:==
+  - 1.测试需要auth
+  - 2.参数 body-json
+      ```json
+        {
+          "content": "你好,我是新人",
+          "momentId": 2
+        }
+      ```
+  > ==本次评论是给动态回复的==(momentId:2),动他的id标注为2,因为是给动态回复的,所以没有参数commentId(给那一条评论回复的)
+### 回复评论接口
+- 同理创建新的接口
+- router
+  ```js
+    // 回复评论
+    commentRouter.post('/reply',verifyAuth,replyComment)
+  ```
+- controller
+  ```js
+    // 回复评论
+    async replyComment(ctx,next){
+      // 1.多拿一份commentId,代表向这条评论回复
+      const {content,momentId,commentId} = ctx.request.body
+      const {id} = ctx.user
+      // console.log(content,momentId,commentId,id)
+      const res = await commentService.reply(content,momentId,commentId,id)
+
+      ctx.body = {
+        code: 0,
+        message: '回复评论成功',
+        data: res
+      }
+    }
+  ```
+- service
+  ```js
+    async reply(content,momentId,commentId,userid){
+      const statement = 'INSERT INTO comment (content,moment_id,comment_id,user_id) VALUES (?,?,?,?);'
+      const [result] = await connection.execute(statement,[content,momentId,commentId,userid])
+      return result
+    }
+  ```
+- ==apifox传参:==
+  - 1.测试需要auth
+  - 2.参数 body-json
+      ```json
+        {
+          "content": "我也是新人,哈哈哈哈",
+          "momentId": 2,
+          "commentId": 1
+        }
+      ```
+  
+  > ==此接口架构和测试几乎与创建评论接口一致,只是多传递一个参数(commentId)==
+  > ==原因==: 此次回复,是针对评论的,所以要书写明白是给那一条评论回复的(commentId),并且两个评论都是在同一个动态下面的动态,所以他们的momentId相同
+- ==示意图==
+  ![回复评论](https://github.com/ProcSheep/picx-images-hosting/raw/master/学习笔记/回复评论.4g4ojjnn37.png)

@@ -1,4 +1,4 @@
-const { NAME_AND_PASSWORD_IS_REQUIERD, NAME_IS_ALREADY_EXISTS,NAME_IS_NOT_EXISTS,PASSWORD_IS_INCORRENT, UNANTHORIZATION } = require('../config/error.js')
+const { NAME_AND_PASSWORD_IS_REQUIERD, NAME_IS_ALREADY_EXISTS,NAME_IS_NOT_EXISTS,PASSWORD_IS_INCORRENT, UNANTHORIZATION, OPERATION_IS_NOT_ALLOW,DATA_IS_NOT_EXISTS } = require('../config/error.js')
 // 集中处理错误
 const app = require('../app/index.js')
 // 监听error事件
@@ -26,6 +26,14 @@ app.on('error',(error,ctx) => {
     case UNANTHORIZATION:
       code = -1005
       message = 'token令牌失效或已过期'
+      break;
+    case OPERATION_IS_NOT_ALLOW:
+      code = -1006
+      message = '没有操作此资源的权限'
+      break;
+    case DATA_IS_NOT_EXISTS:
+      code = -1007
+      message = '数据不存在(可能已被删除)'
       break;
   }
 

@@ -51,7 +51,8 @@ async function verifyLogin(ctx, next) {
 async function  verifyAuth(ctx,next) {
     // 1.获取客户端auth
     const authorization = ctx.headers.authorization
-    if(!authorization) return 
+    // console.log(authorization)
+    if(!authorization) return ctx.app.emit('error',UNANTHORIZATION,ctx)
     const token = authorization.replace('Bearer ','')
 
     // 2.验证token中的信息
