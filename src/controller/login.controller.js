@@ -25,6 +25,15 @@ class LoginController {
       message: '登录成功!'
     }
   }
+
+  // 测试登录接口test
+  async test(ctx,next){
+    ctx.body = {
+      code: 0,
+      message: '登录成功!',
+      info: ctx.user
+    }
+  }
 }
 
 module.exports = new LoginController()

@@ -814,3 +814,88 @@
     ```
 - ==测试结果:==
   ![非对称加密登录](https://github.com/ProcSheep/picx-images-hosting/raw/master/学习笔记/非对称加密登录.86tu30ufan.png)
+### 登录接口的测试
+- ==任务: 封装一个测试登录接口路由,同时封装一个鉴定auth的中间件==
+- 路由创建测试:
+  ```js
+    // login.router.js
+    // 验证Auth的功能许多接口都会使用,所以封装进middleware中间件
+    loginRouter.get('/test',verifyAuth,test)
+  ```
+- 鉴定auth中间件代码
+  ```js
+    // login.middleware.js
+    // 验证Auth的中间件
+    async function  verifyAuth(ctx,next) {
+        // 1.获取客户端auth
+        const authorization = ctx.headers.authorization
+        if(!authorization) return 
+        const token = authorization.replace('Bearer ','')
+        // 2.验证token中的信息
+        try {
+          const res = jwt.verify(token,PUBLIC_KEY,{
+            algorithms: ['RS256']
+          })
+          // 3.把解析的信息存入ctx(下一个中间件使用)
+          ctx.user = res
+          // 4.传递给下一个中间件
+          await next()
+        } catch (error) {
+          ctx.app.emit('error',UNANTHORIZATION,ctx)
+        }
+    }
+  ```
+  > 1.对应的jwt引入和UNANTHORIZATION配置,略
+  > 2.解析逻辑和test文件中非对称加密文件一样
+- 鉴定auth结束后,test中间件负责返回结果
+  ```js
+    // login.controller.js
+    // 测试登录接口test
+    async test(ctx,next){
+      ctx.body = {
+        code: 0,
+        message: '登录成功!',
+        info: ctx.user
+      }
+    }
+  ```
+- ==apifox中自动化token复制==
+  [![pERDCT0.png](https://s21.ax1x.com/2025/04/12/pERDCT0.png)](https://imgse.com/i/pERDCT0)
+### 路由注册自动化
+- 以前的路由注册:
+  ```js 
+    // /app/index.js
+    // 引入路由
+    const userRouter = require('../router/user.router.js')
+    const loginRouter = require('../router/login.router.js')
+
+    app.use(userRouter.routes())
+    app.use(userRouter.allowedMethods())
+    app.use(loginRouter.routes())
+    app.use(loginRouter.allowedMethods())
+  ```
+- 自动化路由文件
+  ```js
+    // router/index.js
+    const fs = require('fs')
+
+    function registerRouters(app){
+      // 1.遍历router文件夹内的所有文件
+      const files = fs.readdirSync(__dirname)
+      // console.log(files)
+      for(file of files){
+        if(!file.endsWith('.router.js')) continue
+        const router = require(`./${file}`)
+        app.use(router.routes())
+        app.use(router.allowedMethods())
+      }
+    }
+
+    module.exports = registerRouters
+  ```
+- 原路由注册文件
+  ```js
+    // /app/index.js
+    const registerRouters = require('../router/index.js')
+    registerRouters(app)
+  ```

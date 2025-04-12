@@ -2,9 +2,12 @@ const {
   NAME_AND_PASSWORD_IS_REQUIERD,
   NAME_IS_NOT_EXISTS,
   PASSWORD_IS_INCORRENT,
+  UNANTHORIZATION,
 } = require("../config/error.js");
+const { PUBLIC_KEY } = require("../config/secret.js");
 const UserService = require("../service/user.service.js");
 const md5password = require("../utils/md5Password.js");
+const jwt = require('jsonwebtoken')
 
 async function verifyLogin(ctx, next) {
   const { name, password } = ctx.request.body;
@@ -44,4 +47,25 @@ async function verifyLogin(ctx, next) {
   await next()
 }
 
-module.exports = { verifyLogin };
+// 验证Auth的中间件
+async function  verifyAuth(ctx,next) {
+    // 1.获取客户端auth
+    const authorization = ctx.headers.authorization
+    if(!authorization) return 
+    const token = authorization.replace('Bearer ','')
+
+    // 2.验证token中的信息
+    try {
+      const res = jwt.verify(token,PUBLIC_KEY,{
+        algorithms: ['RS256']
+      })
+      // 3.把解析的信息存入ctx(下一个中间件使用)
+      ctx.user = res
+      // 4.传递给下一个中间件
+      await next()
+    } catch (error) {
+      ctx.app.emit('error',UNANTHORIZATION,ctx)
+    }
+}
+
+module.exports = { verifyLogin,verifyAuth };

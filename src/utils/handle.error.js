@@ -1,4 +1,4 @@
-const { NAME_AND_PASSWORD_IS_REQUIERD, NAME_IS_ALREADY_EXISTS,NAME_IS_NOT_EXISTS,PASSWORD_IS_INCORRENT } = require('../config/error.js')
+const { NAME_AND_PASSWORD_IS_REQUIERD, NAME_IS_ALREADY_EXISTS,NAME_IS_NOT_EXISTS,PASSWORD_IS_INCORRENT, UNANTHORIZATION } = require('../config/error.js')
 // 集中处理错误
 const app = require('../app/index.js')
 // 监听error事件
@@ -22,6 +22,10 @@ app.on('error',(error,ctx) => {
     case PASSWORD_IS_INCORRENT:
       code = -1004
       message = '密码错误'
+      break;
+    case UNANTHORIZATION:
+      code = -1005
+      message = 'token令牌失效或已过期'
       break;
   }
 
