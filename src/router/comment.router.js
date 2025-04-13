@@ -10,5 +10,8 @@ commentRouter.post('/',verifyAuth,createComment)
 
 // 回复评论
 commentRouter.post('/reply',verifyAuth,replyComment)
+// 删除,查看评论功能 ---> 作业, 和之前的动态内容一样
+// 没有修改评论功能,写过的评论无法更改
+
 
 module.exports = commentRouter

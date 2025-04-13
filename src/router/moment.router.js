@@ -1,8 +1,9 @@
 const KoaRouter = require('@koa/router')
 const {verifyAuth} = require('../middleware/login.middlerware.js')
-const {create,getMomentList,getMomentDetail,updateMoment,deleteMoment} = require('../controller/moment.controller.js')
+const {create,getMomentList,getMomentDetail,updateMoment,deleteMoment, addLabels} = require('../controller/moment.controller.js')
 // const verifyMomentPermission = require('../middleware/permission.middleware.js')
 const verifyPermission = require('../middleware/permission.middleware.js')
+const verifyLabelExists = require('../middleware/label.middleware.js')
 
 
 const momentRouter = new KoaRouter({prefix:'/moment'})
@@ -29,5 +30,8 @@ momentRouter.get('/:momentId',getMomentDetail)
 // 3&4优化鉴权函数后
 momentRouter.patch('/:momentId',verifyAuth,verifyPermission ,updateMoment)
 momentRouter.delete('/:momentId',verifyAuth,verifyPermission,deleteMoment)
+
+// 5.给动态添加新的标签
+momentRouter.post('/:momentId/labels',verifyAuth,verifyPermission,verifyLabelExists,addLabels)
 
 module.exports = momentRouter

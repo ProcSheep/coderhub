@@ -1,6 +1,6 @@
 # coderhub
 ## 易错点ERROR
-### ERR-修改用户动态
+### 数据库操作try-catch
 - 错误来源点`内容管理系统/修改用户动态`
 - router的代码
   ```js
@@ -57,7 +57,9 @@
 - ==**易错点**==
   - 在updateMoment和updateById的代码中,查询数据库操作时没有设置try-catch,所以如果这个操作出现错误,那么就会回到verifyAuth代码中`await next()`,这个代码代表执行下一个中间件,那么当这个中间件出现错误,就会执行verifyAuth内部的try-catch命令,显示你的token过期了,其实根本不是token的问题,只是代码逻辑的问题导致报错爆出的信息误导了你
   - ==解决==: 可以在updateMoment代码中添加新的try-catch语句
-### ERR-删除和修改用户动态测试
+  - ==给数据库操作添加try-catch,当出错时可以详细获取出错的位置和出错的原因==
+### 删除和修改用户动态测试
+- ==apifox对于全局变量token更新不及时或获取出错,所以出现token过期,可以尝试重新复制一遍token==
 - 注意: 删除和修改动态的代码肯定是对的,所以如果出现错误,一定是登录校验的问题,经检查,apifox的全局设置token可能并不及时,有时候出现这种情况,先重新登录一次,然后再把删除和修改动态的接口中auth的token重新设置一次,再从终端中打印看看是不是有token
 ## 项目介绍
 - Coderhub只在创建一个程序员分享生活动态的平台; ==旨在练习node高级和mysql的练习demo==
@@ -66,7 +68,7 @@
   - 面向企业或者内部的后台管理接口
 - ==主要完成的功能和涉及知识点:==
   - 1.用户管理系统 (用户登录注册业务)
-  - 2.内容管理系统 (mysql一对一)
+  - 2.内容动态系统 (mysql一对一)
   - 3.内容评论系统 (mysql一对多)
   - 4.内容标签管理 (mysql多对多)
   - 5.文件管理系统 (文件上传)
@@ -964,6 +966,10 @@
   - 用户动态的增删改查
   - sql语句练习
   - 连表查询
+  - ==**表的关系:**== 
+    - 一对一,一张表 
+    - 一对多/多对一,两张表(连表) 
+    - 多对多,三张表,外加一张关系表
 ### 创建用户动态
 - 1.创建router-controller-service一套后端逻辑系统
 - 2.实现的功能,==发送动态内容(apifox测试==),经验证后,可以存入数据库中
@@ -1425,3 +1431,295 @@
   > ==原因==: 此次回复,是针对评论的,所以要书写明白是给那一条评论回复的(commentId),并且两个评论都是在同一个动态下面的动态,所以他们的momentId相同
 - ==示意图==
   ![回复评论](https://github.com/ProcSheep/picx-images-hosting/raw/master/学习笔记/回复评论.4g4ojjnn37.png)
+### 展示动态和评论的关系
+- ==主要修改对应的sql语句,**新知识sql的子查询**==
+- 1.查询动态列表
+  - 展示动态信息
+  - ==展示每个动态评论的个数==
+    ```sql
+    SELECT
+      m.id id,
+      m.content content,
+      m.createAt createTime,
+      m.updateAt updateTime,
+      JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
+      -- 子查询select的结果别名为commentCount,合并进查询数据
+      -- 当评论表(comment)中的动态id(moment_id)等于动态表的id时(m.id),则表示此评论属于此动态,对它们进行计数,聚合函数COUNT(*)
+      (SELECT COUNT(*) FROM comment WHERE comment.moment_id = m.id) AS commentCount
+    FROM
+      moment m
+      LEFT JOIN user u ON u.id = m.user_id
+      LIMIT ? OFFSET ?;
+    ```
+- 2.查询动态详细信息(==比较难==)
+  - 展示动态信息
+  - ==展示评论的详细信息和创建此评论的用户信息==
+    ```sql
+    SELECT
+      m.id id,
+      m.content content,
+      m.createAt createTime,
+      m.updateAt updateTime,
+      JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
+      -- 内置评论对象内容,每个评论的详细内容和发布者的信息user
+      -- 内置评论对象comments,内容为数组(内聚函数JSON_ARRAYAGG,依照评论的动态id(c.moment_id)分组,然后每个item是对象格式JSON_OBJECT)
+      (
+        JSON_ARRAYAGG(JSON_OBJECT(
+          'id',c.id,'content',c.content,'commentId',c.comment_id,
+          -- user发布评论者的信息
+          'user',JSON_OBJECT('id',cu.id,'name',cu.name)
+        ))
+      ) AS comments
+    FROM
+      moment m
+      LEFT JOIN user u ON u.id = m.user_id
+      -- 2个左连接 动态表moment LEFT JOIN 评论表comment/用户表user
+      LEFT JOIN comment c ON c.moment_id = m.id
+      LEFT JOIN user cu ON cu.id = c.user_id
+      WHERE m.id = ?
+      -- 分组
+      GROUP BY m.id;
+    ```
+- 查询结果示意图:
+  ![动态详情与评论详情](https://github.com/ProcSheep/picx-images-hosting/raw/master/学习笔记/动态详情与评论详情.92qblljsi2.png)
+
+### 标签接口开发
+- 1.sql创建标签表
+  ```sql
+    -- 5.创建标签表
+    CREATE TABLE IF NOT EXISTS `label`(
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      name VARCHAR(10) NOT NULL UNIQUE, -- 标签名字(不能为空,唯一的)
+      createAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updateAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    );
+  ```
+  > 已经加入标签: 篮球 rap 跳舞
+- 2.公式化创建标签接口
+  ```js
+    const {createLabel} = require('../controller/label.controller')
+
+    const labelRouter = new KoaRouter({prefix:'/label'})
+    labelRouter.post('/',verifyAuth,createLabel)
+  ```
+  ```js
+    const labelService = require("../service/label.service")
+
+    class LabelController {
+      async createLabel(ctx,next){
+        const {name} = ctx.request.body
+        const res = await labelService.create(name)
+        ctx.body = {
+          code: 0,
+          message: '创建标签成功',
+          res
+        }
+      }
+    }
+  ```
+  ```js
+    class LabelService {
+      async create(name){
+        const statement = 'INSERT INTO label (name) VALUES (?);'
+        const [result] = await connection.execute(statement,[name])
+        return result
+      }
+    }
+  ```
+### 标签与动态接口开发
+- ==**主要讲多对多的关系**,一个动态可以有多个标签(篮球,rap,跳舞),一个标签可以对应多个动态(篮球-> 坤坤/爱坤/kunkun/你干嘛哎呦)==
+- 多对多关系: 
+  - 学生和课程(sql笔记学过)/动态和标签
+  - ==对于'多对多'关系的处理方式都一样,建立关系表==
+- 前端功能
+  - 创建的动态时,可以选择已经给出的标签,也可以自定义新的标签
+  - 接口格式: `/moment/:momentId/labels`
+  - 传递label数据: `['篮球','rap','跳舞','搞笑','运动','体育']`
+- 后端中间件:
+  - 1.验证登录
+  - 2.验证是否有修改动态的权限
+  - 3.验证标签数据是否存在于label表中
+    - 如果存在,直接使用
+    - 如果不存在,先将新标签加入label表
+    - 最终,所有的标签已经存在于label表中,这时创建动态-标签关系数据,加入'动态-标签'的关系表中去
+- router ==多个中间件,之前的可以复用==
+  ```js
+    // 5.给动态添加新的标签
+    momentRouter.post('/:momentId/labels',verifyAuth,verifyPermission,verifyLabelExists,addLabels)
+  ```
+- ==verifyLabelExists==
+- 客户端传递来的数据`['篮球','rap','跳舞','搞笑','运动','体育']`,去校验它们有没有在label表中
+- 存在就继续,不存在就添加,同时都把它们的id记录到ctx中,为下一个中间件插入moment_id--label_id提供标签id的数据
+  ```js
+    // label.middleware.js
+    const labelService = require("../service/label.service")
+
+    const verifyLabelExists = async (ctx,next) => {
+      // 1.获取客户端传递过来的所有labels
+      const {labels} = ctx.request.body
+
+      // 2.判断所有的labels是否存在于label表中
+      const newLabels = []
+      for(const name of labels){
+        const result = await labelService.queryLabelByName(name)
+        const labelObj = { name } // ES6
+        if(result){ // 查到数据,说明标签在label表中,获取对应标签的id
+          labelObj.id = result.id // => {name: "篮球",id: 1}
+        }else{ // 添加新的标签进入label表,同时获取新加入标签的id
+          const insertResult = await labelService.create(name)
+          // 打印可知,创建成功后,会有insertId属性返回,代表新标签的id值 
+          labelObj.id = insertResult.insertId // => {name: "体育",id:4}
+        }
+        newLabels.push(labelObj)
+      }
+      // 3.把所有的标签加入数组中,形成类似[{name: "篮球",id: 1},{name: "体育",id:4}]的结构
+      // console.log(newLabels)
+      ctx.labels = newLabels // 给下一个中间件的数据
+      
+      // 4.下一个中间件
+      await next()
+    }
+
+    module.exports = verifyLabelExists
+  ```
+- 使用到的数据库service代码 ==queryLabelByName==
+- 简单查询label表中是否有这个标签数据(name)
+  ```js
+      // label.service.js
+     // 2.根据标签名字查询label表中是否有这个数据
+    async queryLabelByName(name){
+      const statement = 'SELECT * FROM label WHERE name = ?;'
+      const [result] = await connection.execute(statement,[name])
+      return result[0]
+    }
+  ```
+- 处理下一个中间件addLabels
+  ```js
+    // moment.controller.js
+    // 为moment添加标签
+    async addLabels(ctx,next){
+      // 1.获取动态和标签参数,为'动态-标签'关系表打基础
+      const {labels} = ctx // labels总结的参数,上一个中间件总结 newLabels
+      const {momentId} = ctx.params 
+      // 2.moment_id和label_id添加到moment_label关系表中
+      try {
+        for(const label of labels){
+          // 2.1 判断关系表中是否存在label_id---moment_id的数据,防止重复给相同的动态添加已经加过的标签
+          const isExists = await momentService.hasLabel(momentId,label.id)
+          if(!isExists){
+            // 2.2 不存在moment_id---label_id关系,就添加这个关系进入关系表
+            const res = await momentService.addLabel(momentId,label.id)
+            // console.log(res)
+          }
+        }
+        ctx.body = {
+          code: 0,
+          message: '为动态添加标签成功'
+        }
+      } catch (error) {
+        ctx.body = {
+          code: -3001,
+          message: '为动态添加标签失败,请检测数据是否有误',
+          error
+        }
+      }    
+    }
+  ```
+  > ==所有的数据库操作其实都可以添加try-catch,这样可以更加细致获取到哪一个数据库操作代码出了问题==
+- 2个momentService的函数
+  ```js
+      // 查询关系表是否存在此momentId,labelId的关系数据
+      async hasLabel(momentId,labelId){
+        const statement = 'SELECT * FROM moment_label WHERE moment_id = ? AND label_id = ?;'
+        const [result] = await connection.execute(statement, [momentId,labelId]);
+        return !!result.length
+      }
+
+      // 给关系表添加新的关系数据
+      async addLabel(momentId,labelId){
+        const statement = 'INSERT INTO moment_label (moment_id,label_id) VALUES (?,?);'
+        const [result] = await connection.execute(statement, [momentId,labelId]);
+        return result
+      }
+  ```
+- 关系表添加结束后
+  ![动态与标签的关系表](https://github.com/ProcSheep/picx-images-hosting/raw/master/学习笔记/动态与标签的关系表.58hk2n1ukr.png)
+### 新增动态的标签个数
+- 在原有的查询动态列表的service中,新增sql语句
+  ```sql
+    SELECT
+      m.id id,
+      m.content content,
+      m.createAt createTime,
+      m.updateAt updateTime,
+      JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
+      (SELECT COUNT(*) FROM comment WHERE comment.moment_id = m.id) AS commentCount,
+    + (SELECT COUNT(*) FROM moment_label ml WHERE ml.moment_id = m.id) AS labelCount
+    FROM
+      moment m
+      LEFT JOIN user u ON u.id = m.user_id
+      LIMIT ? OFFSET ?;
+  ```
+  > 把新增的1行sql语句复制到moment.service.js中的queryList函数中去
+### 查询动态详情+标签数组
+- ==联合sql语句很难,不理解可以查2次,然后用js拼接一下==
+- ==1.两条sql语句方法==
+- 原有的查询动态详情的sql语句不变,新增一个只查询动态标签的sql语句
+  ```sql
+     SELECT
+        m.id id, -- 为了测试具象化保留的,可以没有,只保留label即可
+        m.content content,
+        (
+          JSON_ARRAYAGG(JSON_OBJECT(
+            'id', l.id , 'name',l.name -- label数据
+          ))
+        ) AS labels
+      FROM
+        moment m
+        LEFT JOIN moment_label ml ON ml.moment_id = m.id
+        LEFT JOIN label l ON ml.label_id = l.id
+      WHERE m.id = 12 -- 测试用的 (记得换为?)
+      -- 分组
+      GROUP BY m.id;
+  ```
+  > 把查询数据中的label数据截取出来,然后拼接到原有的查询动态详情的结构后面即可,所有的sql操作后查询的结果,在node后端中都是json数据,所以通过js代码即可轻松拼接,最后返回
+- ==2.一条sql语句解决,使用子查询==
+  ```sql
+    -- 4.2 查询动态详情数据,同时显示评论详情+labels
+    -- 再使用左连接时不对的,因为连续的左连接,前面的左连接会影响到后面的左连接
+    -- 方法 1
+    -- 解决: 子查询,谁复杂把谁放进子查询(查评论V/查标签)
+    -- 把查询评论和查询标签的LEFT JOIN用子查询分开了
+      SELECT
+        m.id id,
+        m.content content,
+        m.createAt createTime,
+        m.updateAt updateTime,
+        JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
+        -- 查询评论详情进入子查询
+        (
+          SELECT
+            JSON_ARRAYAGG(JSON_OBJECT(
+              'id',c.id,'content',c.content,'commentId',c.comment_id,
+              'user',JSON_OBJECT('id',cu.id,'name',cu.name)
+            ))
+          FROM comment c
+          LEFT JOIN user cu ON c.user_id = cu.id
+          WHERE c.moment_id = m.id
+        ) AS comments,
+        (
+          JSON_ARRAYAGG(JSON_OBJECT(
+            'id', l.id , 'name',l.name
+          ))
+        ) AS labels
+      FROM
+        moment m
+        LEFT JOIN user u ON u.id = m.user_id
+        LEFT JOIN moment_label ml ON ml.moment_id = m.id
+        LEFT JOIN label l ON ml.label_id = l.id
+      WHERE m.id = 12 -- 测试用的 (记得换为?)
+      -- 分组
+      GROUP BY m.id;
+  ```
+- 查询的结果
+  ![动态+评论+标签联合sql查询](https://github.com/ProcSheep/picx-images-hosting/raw/master/学习笔记/动态+评论+标签联合sql查询.102csv6y9m.png)

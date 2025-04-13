@@ -73,6 +73,35 @@ class MomentController {
       data: res
     }
   }
+
+  // 为moment添加标签
+  async addLabels(ctx,next){
+    // 1.获取动态和标签参数,为'动态-标签'关系表打基础
+    const {labels} = ctx // labels总结的参数,上一个中间件总结 newLabels
+    const {momentId} = ctx.params 
+    // 2.moment_id和label_id添加到moment_label关系表中
+    try {
+      for(const label of labels){
+        // 2.1 判断关系表中是否存在label_id---moment_id的数据,防止重复给相同的动态添加已经加过的标签
+        const isExists = await momentService.hasLabel(momentId,label.id)
+        if(!isExists){
+          // 2.2 不存在moment_id---label_id关系,就添加这个关系进入关系表
+          const res = await momentService.addLabel(momentId,label.id)
+          // console.log(res)
+        }
+      }
+      ctx.body = {
+        code: 0,
+        message: '为动态添加标签成功'
+      }
+    } catch (error) {
+      ctx.body = {
+        code: -3001,
+        message: '为动态添加标签失败,请检测数据是否有误',
+        error
+      }
+    }    
+  }
 }
 
 module.exports = new MomentController()
