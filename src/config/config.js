@@ -5,5 +5,6 @@ dotenv.config() // 自动加载根目录下的.env文件
 
 // 从process.env中解构出SERVER_PORT然后再暴露出去
 module.exports = {
-  SERVER_PORT
+  SERVER_PORT,
+  SERVER_HOST
 } = process.env

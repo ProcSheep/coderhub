@@ -14,7 +14,7 @@ class MomentService {
         m.content content,
         m.createAt createTime,
         m.updateAt updateTime,
-        JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
+        JSON_OBJECT('id', u.id, 'name', u.NAME,'avatarURL',u.avatar_url, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
         (SELECT COUNT(*) FROM comment WHERE comment.moment_id = m.id) AS commentCount,
         (SELECT COUNT(*) FROM moment_label ml WHERE ml.moment_id = m.id) AS labelCount
       FROM
@@ -36,7 +36,7 @@ class MomentService {
         m.content content,
         m.createAt createTime,
         m.updateAt updateTime,
-        JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
+        JSON_OBJECT('id', u.id, 'name', u.NAME,'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
         -- 查询评论详情进入子查询
         (
           SELECT

@@ -1663,6 +1663,39 @@
   > 把新增的1行sql语句复制到moment.service.js中的queryList函数中去
 ### 查询动态详情+标签数组
 - ==联合sql语句很难,不理解可以查2次,然后用js拼接一下==
+- ==连续的LEFT JOIN是不对的==
+```sql
+   SELECT
+      m.id id,
+      m.content content,
+      m.createAt createTime,
+      m.updateAt updateTime,
+      JSON_OBJECT('id', u.id, 'name', u.NAME, 'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
+      -- 查询评论
+      (
+        JSON_ARRAYAGG(JSON_OBJECT(
+          'id',c.id,'content',c.content,'commentId',c.comment_id,
+          -- user发布评论者的信息
+          'user',JSON_OBJECT('id',cu.id,'name',cu.name)
+        ))
+      ) AS comments,
+      -- 查询标签
+      (
+        JSON_ARRAYAGG(JSON_OBJECT(
+          'id', l.id , 'name',l.name -- label数据
+        ))
+      ) AS labels
+    FROM
+      moment m
+      LEFT JOIN user u ON u.id = m.user_id
+      -- 2个左连接 关于评论的
+      LEFT JOIN comment c ON c.moment_id = m.id
+      LEFT JOIN user cu ON cu.id = c.user_id
+      -- 2个左连接 关于标签的
+      LEFT JOIN moment_label ml ON ml.moment_id = m.id
+      LEFT JOIN label l ON ml.label_id = l.id
+```
+  > 后面查询标签的sql语句'LEFT JOIN'不会依据moment m,而是在前面2个评论的LEFT JOIN查询出的数据的基础上再进行进行标签查询,所以前面查询出的评论有几个,后面查询的标签就会重复几次
 - ==1.两条sql语句方法==
 - 原有的查询动态详情的sql语句不变,新增一个只查询动态标签的sql语句
   ```sql
@@ -1686,7 +1719,6 @@
 - ==2.一条sql语句解决,使用子查询==
   ```sql
     -- 4.2 查询动态详情数据,同时显示评论详情+labels
-    -- 再使用左连接时不对的,因为连续的左连接,前面的左连接会影响到后面的左连接
     -- 方法 1
     -- 解决: 子查询,谁复杂把谁放进子查询(查评论V/查标签)
     -- 把查询评论和查询标签的LEFT JOIN用子查询分开了
@@ -1721,5 +1753,194 @@
       -- 分组
       GROUP BY m.id;
   ```
+  > 如果还想查更多的数据还可以写多个子查询
 - 查询的结果
   ![动态+评论+标签联合sql查询](https://github.com/ProcSheep/picx-images-hosting/raw/master/学习笔记/动态+评论+标签联合sql查询.102csv6y9m.png)
+
+### 上传头像图片
+- 下载: `npm i multer @koa/multer`
+- 上传头像图片逻辑
+  - 图片文件上传接口
+  - 获取图片接口
+  - 请求用户信息,获取头像url
+- 新建头像表
+  ```sql
+    -- 7.创建头像图片信息表
+    CREATE TABLE IF NOT EXISTS `avatar`(
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      filename VARCHAR(255) NOT NULL UNIQUE, -- 文件名字
+      mimetype VARCHAR(30), -- 类型
+      size INT, -- 大小
+      user_id INT, -- 谁上传的
+      createAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updateAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+  ```
+- 创建新的头像上传接口
+  ```js
+    // file.router
+    const KoaRouter = require('@koa/router')
+    const {verifyAuth} = require('../middleware/login.middlerware.js')
+    const hanldAvatar = require('../middleware/file.middleware.js')
+    const {create} = require('../controller/file.controller.js')
+    const fileRouter = new KoaRouter({prefix:'/file'})
+
+    // 上传头像接口
+    fileRouter.post('/avatar',verifyAuth,hanldAvatar,create)
+
+    module.exports = fileRouter
+  ```
+- 中间件handleAvatar
+  ```js
+    // file.middleware.js
+    const multer = require('@koa/multer')
+    const {UPLOAD_PATH} = require('../config/path')
+
+    const upload = multer({
+      storage: multer.diskStorage({
+        destination(req,file,cb){
+          // 相对路径受全局启动配置的路径影响,所以相对路径是以/src为基准的
+          cb(null,UPLOAD_PATH)
+        },
+        filename(req,file,cb){
+          cb(null,Date.now() + "_" + file.originalname)
+        }
+      })
+    })
+
+    const hanldAvatar = upload.single('avatar')
+    module.exports = hanldAvatar
+  ```
+  > 1.UPLOAD_PATH是常量,'./uploads'
+  > 2.==这就是koa文件上传multer的中间件,逻辑一样==
+- 中间价create,获取上传文件的各种信息,存入avatar表
+  ```js
+    class FileController {
+      async create(ctx,next){
+          // console.log(ctx.request.file)
+          // 1.获取信息
+          const {filename,mimetype,size} = ctx.request.file
+          const {id} = ctx.user
+          // 2.将图片和id结合起来存储
+          const res = await fileService.create(filename,mimetype,size,id)
+          // 3.返回结果
+          ctx.body = {
+            code: 0,
+            message: "文件上传成功",
+            avatar: avatarUrl
+          }
+      }
+    }
+  ```
+  > 1.文件上传的知识: 单文件信息获取由ctx.request.file
+  > 2.图片由apifox直接通过form-data上传
+- fileService
+  ```js
+    class FileService {
+      async create(filename,mimetype,size,user_id){
+        const statement = 'INSERT INTO avatar (filename,mimetype,size,user_id) VALUES (?,?,?,?);'
+        const [result] = await connection.execute(statement,[filename,mimetype,size,user_id])
+        return result
+      }
+    }
+  ```
+  > 把对应的值插入avatar表中
+- 插入头像片后的avatar示意图
+  [![pEWr00A.png](https://s21.ax1x.com/2025/04/14/pEWr00A.png)](https://imgse.com/i/pEWr00A)
+### 查看用户头像
+- ==查看用户头像的功能写在user表中,原来的user表需要新增头像地址字段(avatar_url)==
+  ```sql
+    -- 修改user表 增加头像地址栏
+    ALTER TABLE user ADD avatar_url VARCHAR(200);
+  ```
+- ==查看图片的接口(**以下均在user接口下进行**)==
+  ```js
+    // 1.创建路由对象
+    const userRouter = new KoaRouter({ prefix: "/users" });
+    // 查看某个人的头像,不需要任何鉴权
+    userRouter.get('/avatar/:userId',showAvatarImage)
+  ```
+- user.controller中间件,==显示头像图片==
+  ```js
+    async showAvatarImage(ctx,next){
+      const {userId} = ctx.params
+      // 通过获取路由中的用户id,去avatar表中查询头像数据
+      const avatarInfo = await userService.queryAvatarByUserId(userId)
+      // 浏览器显示文件
+      const {filename,mimetype} = avatarInfo
+      ctx.type = mimetype // 设置类型,浏览器根据文件类型才能正常显示图片
+      ctx.body = fs.createReadStream(`${UPLOAD_PATH}/${filename}`)
+    }
+  ```
+  > 1.apifox输入参数格式: `{{baseUrl}}/users/avatar/2`,即查看用户2的头像
+  > 2.通过获取路由中的用户id,去avatar表中查询头像数据
+  > 3.将获取到的头像信息提取一些数据,对应显示在浏览器中,涉及数据流的知识,让浏览器读取本地图片并显示在浏览器上
+  > 4.文件都存在uploads文件夹内,所以直接${}拼接读取即可
+- userService的queryAvatarByUserId
+  ```js
+    async queryAvatarByUserId(userId){
+      // 用户可能上传多张图片,只拿最后一条数据的值(以最新头像为准)
+      const statement = 'SELECT * FROM avatar WHERE user_id = ?;'
+      const [result] = await connection.execute(statement,[userId])
+      return result.pop()
+    }
+  ```
+  > 在avatar表中获取到用户的最新数据
+- ==总结:==
+    上述操作,使得我们可以从avatar表格中查询头像并显示在浏览器中,==接下来我们要在上传头像的时候,把对应的头像地址存入user表的新增字段(avatar_url)中==
+- ==file.controller.js,新增功能==
+  ```js
+    class FileController {
+      async create(ctx,next){
+          // console.log(ctx.request.file)
+          // 1.获取信息
+          const {filename,mimetype,size} = ctx.request.file
+          const {id} = ctx.user
+          // 2.将图片和id结合起来存储
+          const res = await fileService.create(filename,mimetype,size,id)
+          // 3.把头像地址信息存入user表
+          const avatarUrl = `${SERVER_HOST}:${SERVER_PORT}/users/avatar/${id}`
+          // console.log(avatarUrl)
+          // 给user表存入图片url数据
+          const res2 = await userService.updateUserAvatar(avatarUrl,id)
+          // 4.返回结果
+          ctx.body = {
+            code: 0,
+            message: "文件上传成功",
+            avatar: avatarUrl
+          }
+      }
+    }
+  ```
+  > 1.常量`SERVER_HOST=http://localhost`和`SERVER_PORT=8000`
+  > 2.上传头像时,会生成对应的url连接,比如给用户2上传头像,就有`avatar_url = http://localhost:8000/users/avatar/2`
+  > 3.==这里有点绕,我们在file.controller文件中上传图片时,需要给user表也上传图片路径,所以updateUserAvatar函数是user.service的代码,负责操作user数据库==
+- ==user.service.js==
+  ```js
+    // 更新用户的头像url地址
+    async updateUserAvatar(avatarUrl,user_id){
+      const statement = 'UPDATE user SET avatar_url = ? WHERE id = ?;'
+      const [result] = await connection.execute(statement,[avatarUrl,user_id])
+      return result
+    }
+  ```
+  > 根据传入的用户id,把对应的头像地址(avatarUrl)存入数据库,如下
+  [![pEWrwmd.png](https://s21.ax1x.com/2025/04/14/pEWrwmd.png)](https://imgse.com/i/pEWrwmd)
+- ==额外的,给查询动态列表功能中的user信息中,新增user表中的新增属性avatar_url==
+  ```sql
+    -- 查询动态时user中有头像信息
+    SELECT
+        m.id id,
+        m.content content,
+        m.createAt createTime,
+        m.updateAt updateTime,
+        + JSON_OBJECT('id', u.id, 'name', u.NAME, 'avatarURL',u.avatar_url ,'createTime', u.createAt, 'updateTime', u.updateAt) AS user,
+        (SELECT COUNT(*) FROM comment WHERE comment.moment_id = m.id) AS commentCount
+    FROM
+        moment m
+        LEFT JOIN user u ON u.id = m.user_id
+        LIMIT ? OFFSET ?;
+  ```
+  > 在JSON_OBJECT中新增'avatarURL',u.avatar_url
+  > 课后作业: 上传动态的配图,逻辑一样
